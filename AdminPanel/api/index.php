@@ -39,6 +39,7 @@ try {
             'architecture' => substr(trim((string)($data['architecture'] ?? '')), 0, 32),
         ];
         $puppetServer = (string)setting($db, 'puppet_server', 'puppet.lab.local');
+        $puppetServerIp = (string)setting($db, 'puppet_server_ip', '');
         $environment = (string)setting($db, 'puppet_environment', 'production');
         $port = (int)setting($db, 'puppet_port', '8140');
         $row = register_or_get_vm($db, $input, $puppetServer, $environment);
@@ -57,6 +58,7 @@ try {
             'domain' => setting($db, 'domain', ''),
             'puppet' => [
                 'server' => $row['puppet_server'],
+                'server_ip' => $puppetServerIp,
                 'port' => $port,
                 'environment' => $row['puppet_environment'],
             ],
