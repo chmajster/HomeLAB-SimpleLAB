@@ -1,0 +1,4 @@
+Options -Indexes
+RewriteEngine On
+RewriteRule ^api/v1/?$ api/index.php?route= [QSA,L]
+RewriteRule ^api/v1/(.*)$ api/index.php?route=$1 [QSA,L]
