@@ -25,6 +25,12 @@ Usage: sudo $0 [options]
 USAGE
 }
 die(){ echo "ERROR: $*" >&2; exit 1; }
+valid_ipv4(){
+  local ip="$1" a b c d
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  IFS=. read -r a b c d <<< "$ip"
+  (( 10#$a <= 255 && 10#$b <= 255 && 10#$c <= 255 && 10#$d <= 255 ))
+}
 [[ ${EUID} -eq 0 ]] || die "Run as root."
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,6 +60,7 @@ if [[ -z "$PUPPET_IP" ]]; then
   PUPPET_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 fi
 [[ -n "$PUPPET_IP" ]] || die "Cannot determine local Puppet/AdminPanel IP. Use --puppet-ip."
+valid_ipv4 "$PUPPET_IP" || die "Invalid Puppet/AdminPanel IPv4 address: $PUPPET_IP"
 
 # Apache/AdminPanel and Puppet Server are hosted on the same machine.
 # Use a managed marker so rerunning the installer replaces, rather than duplicates, the entry.
