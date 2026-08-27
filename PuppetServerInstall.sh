@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PUPPET_HOSTNAME="puppet.lab.local"
+PUPPET_IP="${SIMPLELAB_PUPPET_IP:-}"
 PUPPET_ENV="production"
 PUPPET_MAJOR=""
 PUPPET_REPO_USER="${PUPPET_REPO_USER:-forge-key}"
@@ -12,6 +13,7 @@ usage() {
   cat <<USAGE
 Usage: sudo $0 [options]
   --hostname NAME         Puppet Server hostname (default: puppet.lab.local)
+  --server-ip IP          IP used for local /etc/hosts entry (default: auto-detect)
   --environment NAME      Default environment (default: production)
   --puppet-major 8|9      Override Puppet major version
   --repo-user USER        Puppet repository user (default: forge-key)
@@ -27,6 +29,7 @@ die(){ echo "ERROR: $*" >&2; exit 1; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --hostname) PUPPET_HOSTNAME="${2:-}"; shift 2 ;;
+    --server-ip) PUPPET_IP="${2:-}"; shift 2 ;;
     --environment) PUPPET_ENV="${2:-}"; shift 2 ;;
     --puppet-major) PUPPET_MAJOR="${2:-}"; shift 2 ;;
     --repo-user) PUPPET_REPO_USER="${2:-}"; shift 2 ;;
@@ -46,15 +49,28 @@ case "${ID:-}" in ubuntu|debian) ;; *) die "Unsupported OS: ${ID:-unknown}" ;; e
 CODENAME="${VERSION_CODENAME:-}"
 [[ -n "$CODENAME" ]] || die "Cannot determine VERSION_CODENAME."
 
+if [[ -z "$PUPPET_IP" ]]; then
+  PUPPET_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}' || true)"
+fi
+if [[ -z "$PUPPET_IP" ]]; then
+  PUPPET_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+fi
+[[ -n "$PUPPET_IP" ]] || die "Cannot determine Puppet Server IP. Use --server-ip."
+
 if [[ -z "$PUPPET_MAJOR" ]]; then case "$CODENAME" in jammy|bookworm) PUPPET_MAJOR=8 ;; *) PUPPET_MAJOR=9 ;; esac; fi
 [[ "$PUPPET_MAJOR" == 8 || "$PUPPET_MAJOR" == 9 ]] || die "Puppet major must be 8 or 9."
 
 printf '==================================================\nHomeLAB SimpleLAB - Puppet Server Installer\n==================================================\n'
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl >/dev/null
+apt-get install -y -qq ca-certificates curl iproute2 >/dev/null
 hostnamectl set-hostname "$PUPPET_HOSTNAME"
 printf '%s\n' "$PUPPET_HOSTNAME" > /etc/hostname
+
+# AdminPanel and Puppet Server run on this same machine. Keep local Puppet DNS
+# resolution deterministic even when no DNS record exists yet.
+sed -i '/# HomeLAB-SimpleLAB Puppet Server$/d' /etc/hosts
+printf '%s\t%s\tpuppet\t# HomeLAB-SimpleLAB Puppet Server\n' "$PUPPET_IP" "$PUPPET_HOSTNAME" >> /etc/hosts
 
 RELEASE_DEB="/tmp/puppet${PUPPET_MAJOR}-release-${CODENAME}.deb"
 RELEASE_URL="https://apt-puppetcore.puppet.com/public/puppet${PUPPET_MAJOR}-release-${CODENAME}.deb"
@@ -97,6 +113,8 @@ cat <<OUT
 Puppet Server installed successfully
 ==================================================
 Hostname: ${PUPPET_HOSTNAME}
+IP:       ${PUPPET_IP}
+Hosts:    ${PUPPET_IP} ${PUPPET_HOSTNAME} puppet
 Port:     8140
 Service:  puppetserver
 Status:   running
