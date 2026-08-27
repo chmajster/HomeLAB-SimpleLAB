@@ -1,0 +1,50 @@
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hostname_patterns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    pattern TEXT NOT NULL UNIQUE,
+    start_number INTEGER NOT NULL DEFAULT 1 CHECK(start_number >= 0),
+    current_number INTEGER NOT NULL DEFAULT 0 CHECK(current_number >= 0),
+    active INTEGER NOT NULL DEFAULT 0 CHECK(active IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_single_active_pattern
+ON hostname_patterns(active) WHERE active = 1;
+
+CREATE TABLE IF NOT EXISTS virtual_machines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    machine_id TEXT NOT NULL UNIQUE,
+    hostname TEXT NOT NULL UNIQUE,
+    ip_address TEXT NOT NULL DEFAULT '',
+    mac_address TEXT NOT NULL DEFAULT '',
+    os TEXT NOT NULL DEFAULT '',
+    os_version TEXT NOT NULL DEFAULT '',
+    architecture TEXT NOT NULL DEFAULT '',
+    puppet_server TEXT NOT NULL,
+    puppet_environment TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
