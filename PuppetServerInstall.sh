@@ -24,6 +24,12 @@ USAGE
 }
 
 die(){ echo "ERROR: $*" >&2; exit 1; }
+valid_ipv4(){
+  local ip="$1" a b c d
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  IFS=. read -r a b c d <<< "$ip"
+  (( 10#$a <= 255 && 10#$b <= 255 && 10#$c <= 255 && 10#$d <= 255 ))
+}
 [[ ${EUID} -eq 0 ]] || die "Run as root."
 
 while [[ $# -gt 0 ]]; do
@@ -49,14 +55,6 @@ case "${ID:-}" in ubuntu|debian) ;; *) die "Unsupported OS: ${ID:-unknown}" ;; e
 CODENAME="${VERSION_CODENAME:-}"
 [[ -n "$CODENAME" ]] || die "Cannot determine VERSION_CODENAME."
 
-if [[ -z "$PUPPET_IP" ]]; then
-  PUPPET_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}' || true)"
-fi
-if [[ -z "$PUPPET_IP" ]]; then
-  PUPPET_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-fi
-[[ -n "$PUPPET_IP" ]] || die "Cannot determine Puppet Server IP. Use --server-ip."
-
 if [[ -z "$PUPPET_MAJOR" ]]; then case "$CODENAME" in jammy|bookworm) PUPPET_MAJOR=8 ;; *) PUPPET_MAJOR=9 ;; esac; fi
 [[ "$PUPPET_MAJOR" == 8 || "$PUPPET_MAJOR" == 9 ]] || die "Puppet major must be 8 or 9."
 
@@ -64,6 +62,14 @@ printf '==================================================\nHomeLAB SimpleLAB - 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl iproute2 >/dev/null
+if [[ -z "$PUPPET_IP" ]]; then
+  PUPPET_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}' || true)"
+fi
+if [[ -z "$PUPPET_IP" ]]; then
+  PUPPET_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+fi
+[[ -n "$PUPPET_IP" ]] || die "Cannot determine Puppet Server IP. Use --server-ip."
+valid_ipv4 "$PUPPET_IP" || die "Invalid Puppet Server IPv4 address: $PUPPET_IP"
 hostnamectl set-hostname "$PUPPET_HOSTNAME"
 printf '%s\n' "$PUPPET_HOSTNAME" > /etc/hostname
 
