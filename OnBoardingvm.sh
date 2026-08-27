@@ -85,16 +85,31 @@ TMP_RESPONSE="$(mktemp)"; trap 'rm -f "$TMP_RESPONSE"' EXIT
 HTTP_CODE="$(curl --silent --show-error --connect-timeout 10 --max-time 30 -o "$TMP_RESPONSE" -w '%{http_code}' -X POST "${BASE_URL}/api/v1/onboarding" -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data "$PAYLOAD")" || die "Cannot connect to AdminPanel: $BASE_URL"
 [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "201" ]] || die "AdminPanel returned HTTP $HTTP_CODE: $(cat "$TMP_RESPONSE")"
 jq -e '.success == true and (.hostname|type=="string") and (.puppet.server|type=="string") and (.puppet.environment|type=="string")' "$TMP_RESPONSE" >/dev/null || die "AdminPanel returned invalid JSON configuration."
-NEW_HOSTNAME="$(jq -r '.hostname' "$TMP_RESPONSE")"; PUPPET_SERVER="$(jq -r '.puppet.server' "$TMP_RESPONSE")"; PUPPET_ENV="$(jq -r '.puppet.environment' "$TMP_RESPONSE")"; PUPPET_PORT="$(jq -r '.puppet.port // 8140' "$TMP_RESPONSE")"
+NEW_HOSTNAME="$(jq -r '.hostname' "$TMP_RESPONSE")"
+PUPPET_SERVER="$(jq -r '.puppet.server' "$TMP_RESPONSE")"
+PUPPET_SERVER_IP="$(jq -r '.puppet.server_ip // empty' "$TMP_RESPONSE")"
+PUPPET_ENV="$(jq -r '.puppet.environment' "$TMP_RESPONSE")"
+PUPPET_PORT="$(jq -r '.puppet.port // 8140' "$TMP_RESPONSE")"
 [[ "$NEW_HOSTNAME" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || die "Invalid hostname received from API: $NEW_HOSTNAME"
 [[ "$PUPPET_SERVER" =~ ^[A-Za-z0-9.-]+$ ]] || die "Invalid Puppet server received from API."
 [[ "$PUPPET_ENV" =~ ^[A-Za-z0-9_-]+$ ]] || die "Invalid Puppet environment received from API."
 [[ "$PUPPET_PORT" =~ ^[0-9]+$ ]] || die "Invalid Puppet port received from API."
+if [[ -n "$PUPPET_SERVER_IP" && ! "$PUPPET_SERVER_IP" =~ ^[0-9A-Fa-f:.]+$ ]]; then
+  die "Invalid Puppet server IP received from API."
+fi
 log "[3/7] Received hostname: $NEW_HOSTNAME"
 
-log "[4/7] Setting hostname..."
+log "[4/7] Setting hostname and Puppet hosts entry..."
 hostnamectl set-hostname "$NEW_HOSTNAME"; printf '%s\n' "$NEW_HOSTNAME" > /etc/hostname
 if grep -qE '^127\.0\.1\.1[[:space:]]+' /etc/hosts; then sed -i -E "s/^127\.0\.1\.1[[:space:]]+.*/127.0.1.1\t${NEW_HOSTNAME}/" /etc/hosts; else printf '127.0.1.1\t%s\n' "$NEW_HOSTNAME" >> /etc/hosts; fi
+
+# AdminPanel and Puppet Server are co-located. The API returns the server IP so
+# the new VM can resolve the Puppet hostname even before a DNS record exists.
+sed -i '/# HomeLAB-SimpleLAB Puppet Server$/d' /etc/hosts
+if [[ -n "$PUPPET_SERVER_IP" ]]; then
+  printf '%s\t%s\tpuppet\t# HomeLAB-SimpleLAB Puppet Server\n' "$PUPPET_SERVER_IP" "$PUPPET_SERVER" >> /etc/hosts
+  log "      /etc/hosts: $PUPPET_SERVER_IP -> $PUPPET_SERVER"
+fi
 
 log "[5/7] Installing Puppet Agent..."
 RELEASE_DEB="/tmp/puppet${PUPPET_MAJOR}-release-${CODENAME}.deb"; RELEASE_URL="https://apt-puppetcore.puppet.com/public/puppet${PUPPET_MAJOR}-release-${CODENAME}.deb"
