@@ -2,20 +2,23 @@
 
 HomeLAB-SimpleLAB automatyzuje onboarding maszyn Linux do HomeLAB. AdminPanel przydziela unikalny hostname, przechowuje stan VM i zwraca konfigurację Puppet. `OnBoardingvm.sh` ustawia hostname na nowej VM, instaluje Puppet Agent i uruchamia pierwszy przebieg agenta.
 
+AdminPanel/Apache2 i Puppet Server są projektowane do działania na tej samej maszynie. Instalatory automatycznie zapisują IP tej maszyny jako `puppet_server_ip` oraz utrzymują zarządzany wpis `/etc/hosts` dla hostname Puppet Mastera.
+
 ## Architektura
 
 ```text
                     +-----------------------+
                     |       AdminPanel      |
                     | PHP + SQLite + REST   |
+                    | Apache2               |
                     +-----------+-----------+
                                 |
-                  +-------------+-------------+
-                  |                           |
-                  v                           v
-           Hostname Generator          Puppet Settings
-                  |                           |
-                  +-------------+-------------+
+                     SAME SERVER / SAME IP
+                                |
+                    +-----------+-----------+
+                    |      Puppet Server    |
+                    |       TCP/8140        |
+                    +-----------+-----------+
                                 |
                                 v
                        +----------------+
@@ -27,10 +30,11 @@ HomeLAB-SimpleLAB automatyzuje onboarding maszyn Linux do HomeLAB. AdminPanel pr
                 +--------------+--------------+
                 |                             |
                 v                             v
-         Set hostname                  Install Puppet
-                                              |
-                                              v
-                                      Puppet Master
+         Set hostname                 Add /etc/hosts
+                                      Puppet mapping
+                                               |
+                                               v
+                                      Install Puppet
 ```
 
 ## Struktura
@@ -65,13 +69,34 @@ cd HomeLAB-SimpleLAB
 sudo ./install.sh --admin-panel
 ```
 
-Lub:
+Lub z jawnym adresem wspólnego serwera Apache/Puppet:
 
 ```bash
-sudo ./AdminPanel/install.sh --base-url http://10.0.0.10
+sudo ./AdminPanel/install.sh \
+  --base-url http://10.0.0.10 \
+  --puppet-hostname puppet.lab.local \
+  --puppet-ip 10.0.0.10
 ```
 
-Instalator generuje hasło administratora i API token, inicjalizuje SQLite, konfiguruje Apache i sprawdza `/api/v1/health`.
+Jeżeli `--puppet-ip` nie zostanie podane, instalator automatycznie wykryje główny adres IPv4 serwera.
+
+Instalator:
+
+- generuje hasło administratora i API token,
+- inicjalizuje SQLite,
+- konfiguruje Apache,
+- zapisuje `puppet_server = puppet.lab.local`,
+- zapisuje `puppet_server_ip = <IP serwera>`,
+- dodaje zarządzany wpis do `/etc/hosts`,
+- sprawdza `/api/v1/health`.
+
+Przykładowy wpis na serwerze:
+
+```text
+10.0.0.10    puppet.lab.local    puppet    # HomeLAB-SimpleLAB Puppet Server
+```
+
+Ponowne uruchomienie instalatora zastępuje wpis oznaczony komentarzem `# HomeLAB-SimpleLAB Puppet Server` zamiast tworzyć duplikaty.
 
 Dane runtime:
 
@@ -86,12 +111,17 @@ Dane runtime:
 
 Dla Ubuntu 22.04/Debian 12 skrypty domyślnie wybierają Puppet 8. Dla Ubuntu 24.04/Debian 13 i nowszych wybierają Puppet 9. Aktualne repozytoria Puppet Core mogą wymagać konta `forge-key` i API key.
 
+Apache2/AdminPanel i Puppet Server mają działać na tym samym adresie IP. Instalator Puppet również tworzy ten sam zarządzany wpis `/etc/hosts`.
+
 ```bash
 sudo ./PuppetServerInstall.sh \
   --hostname puppet.lab.local \
+  --server-ip 10.0.0.10 \
   --environment production \
   --repo-key 'PUPPET_CORE_API_KEY'
 ```
+
+`--server-ip` jest opcjonalne. Bez niego adres IPv4 zostanie wykryty automatycznie.
 
 Autosign jest domyślnie wyłączony. W izolowanym labie można jawnie użyć `--autosign`.
 
@@ -116,6 +146,14 @@ sudo ./OnBoardingvm.sh \
 ```
 
 Skrypt wysyła `machine_id`, aktualny hostname, IP, MAC, system i architekturę. `/etc/machine-id` jest identyfikatorem idempotencji: ta sama VM zawsze otrzymuje wcześniej przypisany hostname.
+
+API onboardingu zwraca zarówno hostname Puppet Mastera, jak i jego IP. Ponieważ Apache/AdminPanel i Puppet Master działają na jednym serwerze, VM automatycznie dodaje:
+
+```text
+10.0.0.10    puppet.lab.local    puppet    # HomeLAB-SimpleLAB Puppet Server
+```
+
+Dzięki temu `puppet.lab.local` działa nawet bez rekordu DNS. Jeżeli starsza instalacja AdminPanel nie ma jeszcze ustawionego `puppet_server_ip`, `OnBoardingvm.sh` użyje IP podanego jako adres AdminPanel, jeśli jest to adres IPv4.
 
 ## Hostname Patterns
 
@@ -151,6 +189,22 @@ curl -X POST http://10.0.0.10/api/v1/onboarding \
     "os_version":"24.04",
     "architecture":"x86_64"
   }'
+```
+
+Przykład odpowiedzi:
+
+```json
+{
+  "success": true,
+  "existing": false,
+  "hostname": "SCL00001",
+  "puppet": {
+    "server": "puppet.lab.local",
+    "server_ip": "10.0.0.10",
+    "port": 8140,
+    "environment": "production"
+  }
+}
 ```
 
 Pierwsza rejestracja zwraca HTTP `201`. Ponowny onboarding tej samej VM zwraca HTTP `200`, `existing: true` i ten sam hostname.
@@ -213,6 +267,22 @@ php -S 127.0.0.1:8080 AdminPanel/router.php
 ```
 
 ## Troubleshooting
+
+### Puppet hostname nie rozwiązuje się na VM
+
+Sprawdź:
+
+```bash
+grep 'HomeLAB-SimpleLAB Puppet Server' /etc/hosts
+```
+
+Oczekiwany wpis:
+
+```text
+10.0.0.10    puppet.lab.local    puppet    # HomeLAB-SimpleLAB Puppet Server
+```
+
+Sprawdź również konfigurację w AdminPanel -> Puppet: `Puppet Master IP` powinien wskazywać ten sam adres co Apache/AdminPanel.
 
 ### HTTP 401
 
