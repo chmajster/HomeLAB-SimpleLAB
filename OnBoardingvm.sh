@@ -28,6 +28,12 @@ USAGE
 
 log() { printf '%s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+valid_ipv4() {
+  local ip="$1" a b c d
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  IFS=. read -r a b c d <<< "$ip"
+  (( 10#$a <= 255 && 10#$b <= 255 && 10#$c <= 255 && 10#$d <= 255 ))
+}
 
 [[ ${EUID} -eq 0 ]] || die "Run this script as root."
 
@@ -90,12 +96,19 @@ PUPPET_SERVER="$(jq -r '.puppet.server' "$TMP_RESPONSE")"
 PUPPET_SERVER_IP="$(jq -r '.puppet.server_ip // empty' "$TMP_RESPONSE")"
 PUPPET_ENV="$(jq -r '.puppet.environment' "$TMP_RESPONSE")"
 PUPPET_PORT="$(jq -r '.puppet.port // 8140' "$TMP_RESPONSE")"
+if [[ -z "$PUPPET_SERVER_IP" ]]; then
+  ADMIN_PANEL_HOST="${BASE_URL#http://}"
+  ADMIN_PANEL_HOST="${ADMIN_PANEL_HOST#https://}"
+  ADMIN_PANEL_HOST="${ADMIN_PANEL_HOST%%/*}"
+  ADMIN_PANEL_HOST="${ADMIN_PANEL_HOST%%:*}"
+  if valid_ipv4 "$ADMIN_PANEL_HOST"; then PUPPET_SERVER_IP="$ADMIN_PANEL_HOST"; fi
+fi
 [[ "$NEW_HOSTNAME" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || die "Invalid hostname received from API: $NEW_HOSTNAME"
 [[ "$PUPPET_SERVER" =~ ^[A-Za-z0-9.-]+$ ]] || die "Invalid Puppet server received from API."
 [[ "$PUPPET_ENV" =~ ^[A-Za-z0-9_-]+$ ]] || die "Invalid Puppet environment received from API."
 [[ "$PUPPET_PORT" =~ ^[0-9]+$ ]] || die "Invalid Puppet port received from API."
-if [[ -n "$PUPPET_SERVER_IP" && ! "$PUPPET_SERVER_IP" =~ ^[0-9A-Fa-f:.]+$ ]]; then
-  die "Invalid Puppet server IP received from API."
+if [[ -n "$PUPPET_SERVER_IP" ]] && ! valid_ipv4 "$PUPPET_SERVER_IP"; then
+  die "Invalid Puppet server IPv4 address received from API: $PUPPET_SERVER_IP"
 fi
 log "[3/7] Received hostname: $NEW_HOSTNAME"
 
@@ -105,8 +118,8 @@ if grep -qE '^127\.0\.1\.1[[:space:]]+' /etc/hosts; then sed -i -E "s/^127\.0\.1
 
 # AdminPanel and Puppet Server are co-located. The API returns the server IP so
 # the new VM can resolve the Puppet hostname even before a DNS record exists.
-sed -i '/# HomeLAB-SimpleLAB Puppet Server$/d' /etc/hosts
 if [[ -n "$PUPPET_SERVER_IP" ]]; then
+  sed -i '/# HomeLAB-SimpleLAB Puppet Server$/d' /etc/hosts
   printf '%s\t%s\tpuppet\t# HomeLAB-SimpleLAB Puppet Server\n' "$PUPPET_SERVER_IP" "$PUPPET_SERVER" >> /etc/hosts
   log "      /etc/hosts: $PUPPET_SERVER_IP -> $PUPPET_SERVER"
 fi
