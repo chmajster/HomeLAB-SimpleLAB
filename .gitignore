@@ -1,0 +1,7 @@
+AdminPanel/data/*.db
+AdminPanel/data/*.sqlite
+AdminPanel/data/*.sqlite3
+AdminPanel/data/logs/
+*.log
+.env
+.DS_Store
